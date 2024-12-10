@@ -64,6 +64,12 @@ This asymmetric generation process allows training models on challenging mapping
 
 ---
 
+## Reproducibility / Data
+
+Below are instructions on how to reproduce our work based on the code provided here. We are in the process of uploading data and model checkpoint files to Zenodo for additional reproducibility. While these files will provide convenient access to pre-generated data and trained models, all necessary scripts and configurations are already included in this repository to allow complete reproduction of the data and models.
+
+---
+
 ## Installation
 
 1. Clone the repository:
