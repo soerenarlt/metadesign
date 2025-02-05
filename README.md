@@ -1,5 +1,8 @@
 
 # Meta-Designing Quantum Experiments with Sequence-to-Sequence Transformers
+*Sören Arlt, Haonan Duan, Felix Li, Sang Michael Xie, Yuhuai Wu, Mario Krenn*
+
+**[arXiv:2406.02470](https://arxiv.org/abs/2406.02470)**
 
 This repository implements a sequence-to-sequence transformer for generating meta-solutions—Python programs that generalize experimental designs for entire classes of problems. The implementation builds on the simple and effective framework of NanoGPT for transformer training, but is tailored to tasks involving the meta-design of experiments. Specifically, it enables the creation of scalable, interpretable solutions for designing quantum systems and other structured tasks.
 
@@ -125,4 +128,12 @@ The interpretability of the generated solutions provides human-readable insights
 ## Citation
 
 If you use this repository in your work, please cite:
-> Arlt, S., Duan, H., Li, F., Xie, S. M., Wu, Y., & Krenn, M. (2024). *Meta-Designing Quantum Experiments with Language Models*. [arXiv:2405.06107](https://arxiv.org/abs/2405.06107).
+```
+@article{arlt2024meta,
+  title={Meta-Designing Quantum Experiments with Language Models},
+  author={Arlt, S{\"o}ren and Duan, Haonan and Li, Felix and Xie, Sang Michael and Wu, Yuhuai and Krenn, Mario},
+  journal={arXiv preprint arXiv:2406.02470},
+  doi={https://doi.org/10.48550/arXiv.2406.02470},
+  year={2024}
+}
+```
