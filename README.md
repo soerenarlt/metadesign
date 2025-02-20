@@ -104,7 +104,7 @@ python train.py --config ckpt_circuit/config.py
 
 ---
 ### **Sampling**
-After the models are trained or downloaded from Zenodo, they should be placed in the following locations:
+After the models are trained or downloaded from [Zenodo](https://zenodo.org/records/14899993), they should be placed in the following locations:
 ```
 ckpt_main/ckpt_main.pt
 ckpt_circuit/ckpt_circuit.pt
@@ -460,3 +460,9 @@ If you use this repository in your work, please cite:
   year={2024}
 }
 ```
+
+## Related links
+* zenodo: https://doi.org/10.5281/zenodo.14899993
+* arxiv: https://doi.org/10.48550/arXiv.2406.02470
+
+
