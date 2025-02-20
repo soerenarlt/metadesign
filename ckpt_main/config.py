@@ -12,7 +12,7 @@ log_interval = 10 # don't print too too often
 
 always_save_checkpoint = False
 
-wandb_log = True # log to weights and biases
+wandb_log = False # log to weights and biases
 wandb_project = 'quantum'
 wandb_run_name = 'main'
 

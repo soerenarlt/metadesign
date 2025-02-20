@@ -97,7 +97,7 @@ def execute_code(code, curr_NN):
     # print('Qiskit code:')
     # print(qiskit_code)
     if len(qiskit_code)==0:
-        print('No cricuit generated.')
+        print('No circuit generated.')
         raise ValueError("No qiskit code.")
         
     try:
@@ -241,7 +241,7 @@ for c in combs:
         combs_filtered.append(c)
 
 val_verts_0 = combs_filtered
-print(val_verts_0)        
+# print(val_verts_0)        
 
 #LAYER 1
 
@@ -254,7 +254,7 @@ ranges = [''.join(r) for r in ranges]
 ranges = [r for r in ranges if r != '' and r != '1']
 #if range starts with +, remove it
 ranges = [r[1:] if r[0] == '+' else r for r in ranges]
-print(f'Ranges: {ranges}')
+# print(f'Ranges: {ranges}')
 
 ints = ['-1','','1','2']
 scale = ['','+NN']
@@ -266,7 +266,7 @@ combs = [c for c in combs if c != '']
 combs += ['0'] 
 #if comb starts with +, remove it
 combs = [c[1:] if c[0] == '+' else c for c in combs]
-print(f'Combs: {combs}')
+# print(f'Combs: {combs}')
 
 val_verts_1 = {}
 for r in ranges:
@@ -375,77 +375,78 @@ def generate_valid_code():
             break
     return code, states
 
-#task id
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument('--task_id', type=int, default=0)
-args = parser.parse_args()
-node_id = args.task_id
-local_id = os.environ.get('SLURM_LOCALID', 0)
-print(f"Local Task ID: {local_id}")
-SLURMID = str(32*int(node_id) + int(local_id))
-print(f"Task ID: {SLURMID}")
+if __name__ == '__main__':
+    #task id
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--task_id', type=int, default=0)
+    args = parser.parse_args()
+    node_id = args.task_id
+    local_id = os.environ.get('SLURM_LOCALID', 0)
+    print(f"Local Task ID: {local_id}")
+    SLURMID = str(32*int(node_id) + int(local_id))
+    print(f"Task ID: {SLURMID}")
 
-#load json
-src_tok = json.load(open('src_tok_v3.json'))
-tgt_tok = json.load(open('tgt_tok_v3.json'))
+    #load json
+    src_tok = json.load(open('src_tok_v3.json'))
+    tgt_tok = json.load(open('tgt_tok_v3.json'))
 
-SEP_TOKEN = '<SEP>'
-START_TOKEN = '<SOS>'
-END_TOKEN = '<EOS>'
-PAD_TOKEN = '<PAD>'
+    SEP_TOKEN = '<SEP>'
+    START_TOKEN = '<SOS>'
+    END_TOKEN = '<EOS>'
+    PAD_TOKEN = '<PAD>'
 
-MAX_TOKS = 100
+    MAX_TOKS = 100
 
-NUM_SAMPLES = 100000
-val_samples = 0
-data_buffer = []
-while val_samples < NUM_SAMPLES:
-    code, states = generate_valid_code()
-    states = SEP_TOKEN.join(states)
-    # print(code)
-    # print(states)
+    NUM_SAMPLES = 100000
+    val_samples = 0
+    data_buffer = []
+    while val_samples < NUM_SAMPLES:
+        code, states = generate_valid_code()
+        states = SEP_TOKEN.join(states)
+        # print(code)
+        # print(states)
 
-    tok_tgt = tokenize_string(code,tgt_tok)
-    tok_src = tokenize_string(states,src_tok)
-    if len(tok_tgt) > MAX_TOKS or len(tok_src) > MAX_TOKS:
-        # print('skipping')
-        continue
-    #pad the sequences
-    tok_tgt = np.pad(tok_tgt, (0, MAX_TOKS-len(tok_tgt)), 'constant', constant_values=(tgt_tok[PAD_TOKEN]))
-    tok_src = np.pad(tok_src, (0, MAX_TOKS-len(tok_src)), 'constant', constant_values=(src_tok[PAD_TOKEN]))
-    sample = {
-        'code': tok_tgt,
-        'state': tok_src
-    }
+        tok_tgt = tokenize_string(code,tgt_tok)
+        tok_src = tokenize_string(states,src_tok)
+        if len(tok_tgt) > MAX_TOKS or len(tok_src) > MAX_TOKS:
+            # print('skipping')
+            continue
+        #pad the sequences
+        tok_tgt = np.pad(tok_tgt, (0, MAX_TOKS-len(tok_tgt)), 'constant', constant_values=(tgt_tok[PAD_TOKEN]))
+        tok_src = np.pad(tok_src, (0, MAX_TOKS-len(tok_src)), 'constant', constant_values=(src_tok[PAD_TOKEN]))
+        sample = {
+            'code': tok_tgt,
+            'state': tok_src
+        }
 
-    data_buffer.append(sample)
-    if len(data_buffer) % 1000 == 0:
-        maxshape_dict = {
-                        'code': (None, MAX_TOKS),
-                        'state': (None, MAX_TOKS)
-                    }
-        print(f'Generated {val_samples} samples.', flush=True)
-        #save to hdf5
-        with h5py.File(f'data/data_{SLURMID}.hdf5', 'a') as f:
-            for key, val in data_buffer[0].items():
-                if key not in f:
-                    init_shape = (0, *maxshape_dict[key][1:])
-                    print(f'creating dataset {key} with shape {init_shape}')
-                    f.create_dataset(key, init_shape, maxshape=maxshape_dict[key], dtype='int8')
-                # print(key, val, val.shape)
-                f[key].resize((f[key].shape[0] + len(data_buffer)), axis = 0)
-                #padding
-                if key in ['code', 'state']:
-                    data = np.zeros((len(data_buffer), MAX_TOKS), dtype='int8')
-                    for i, sample in enumerate(data_buffer):
-                        data[i,:len(sample[key])] = sample[key]
-                else:
-                    data = np.array([sample[key] for sample in data_buffer], dtype='int8')
-                f[key][-len(data_buffer):] = data
-                #print new shape
-                print(f'{key} shape: {f[key].shape}')
+        data_buffer.append(sample)
+        if len(data_buffer) % 1000 == 0:
+            maxshape_dict = {
+                            'code': (None, MAX_TOKS),
+                            'state': (None, MAX_TOKS)
+                        }
+            print(f'Generated {val_samples} samples.', flush=True)
+            #save to hdf5
+            with h5py.File(f'data/data_{SLURMID}.hdf5', 'a') as f:
+                for key, val in data_buffer[0].items():
+                    if key not in f:
+                        init_shape = (0, *maxshape_dict[key][1:])
+                        print(f'creating dataset {key} with shape {init_shape}')
+                        f.create_dataset(key, init_shape, maxshape=maxshape_dict[key], dtype='int8')
+                    # print(key, val, val.shape)
+                    f[key].resize((f[key].shape[0] + len(data_buffer)), axis = 0)
+                    #padding
+                    if key in ['code', 'state']:
+                        data = np.zeros((len(data_buffer), MAX_TOKS), dtype='int8')
+                        for i, sample in enumerate(data_buffer):
+                            data[i,:len(sample[key])] = sample[key]
+                    else:
+                        data = np.array([sample[key] for sample in data_buffer], dtype='int8')
+                    f[key][-len(data_buffer):] = data
+                    #print new shape
+                    print(f'{key} shape: {f[key].shape}')
 
-        data_buffer = []
-    val_samples += 1
+            data_buffer = []
+        val_samples += 1
 

@@ -1,0 +1,5 @@
+metadesign/
+__pycache__/
+ckpt_circuit/ckpt_circuit.pt
+ckpt_main/ckpt_main.pt
+.DS_Store

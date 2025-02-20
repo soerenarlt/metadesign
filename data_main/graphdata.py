@@ -1,4 +1,4 @@
-import fancy_classes as fc
+import pytheus.fancy_classes as fc
 import random
 import h5py
 import os
@@ -9,7 +9,7 @@ from termcolor import colored
 import collections
 
 # from html_plot import plot_graph
-from fancy_classes import Graph
+from pytheus.fancy_classes import Graph
 
 sign_dict = {-1:'-', 1:'+'}
 sign_dict_inv = {'-':-1, '+':1}
@@ -116,7 +116,9 @@ def generate_graph(pred_str,N):
     exec(pred_str)
     print(edge_list)
     # plot_graph(edge_list, 'pred'+str(N)+'.html')
-    gg_pred = Graph(edge_list, catch_zero_weights = False)
+    gg_pred = Graph(edge_list)
+    if any (val == 0 for val in gg_pred.weights):
+            raise Exception('There are edges with weight 0')
     gg_pred.getState()
     print(f'graph generates: {build_state_string(gg_pred.state)}')
     return gg_pred
