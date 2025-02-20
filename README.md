@@ -17,14 +17,48 @@ This approach enables the discovery of interpretable solutions that generalize a
 
 ---
 
+## Methodology
+
+This repository employs a transformer-based sequence-to-sequence model trained on synthetic datasets of quantum states and Python programs. The transformer captures patterns in the data to generate interpretable solutions that generalize across problem domains. Synthetic data generation is achieved by simulating quantum optics experiments using the `pytheusQ` library for the main task or simulating quantum circuits using the `qiskit` library. Sampling uses probabilistic techniques to generate multiple candidate solutions, which are then evaluated for fidelity to the target quantum states.
+
+---
+
+## Results and Insights
+
+This project demonstrates the ability of transformer models to:
+1. Generate human-readable Python code that generalizes across problem domains.
+2. Rediscover known meta-solutions (e.g., GHZ state setups).
+3. Discover new meta-solutions for previously unsolved classes of quantum experiments, such as spin-½ states in photonic systems.
+
+The interpretability of the generated solutions provides human-readable insights into the underlying patterns, enabling scientists to extend these solutions to larger, more complex systems.
+
+
+---
+
+## Features
+
+### **Meta-Design of Quantum Experiments**
+This repository focuses on using transformer models for meta-design, enabling the generation of scalable solutions to classes of problems. For example:
+- Generate Python programs for designing experimental setups for quantum states like GHZ and W-states.
+- Extrapolate solutions to larger system sizes using patterns captured during training.
+
+### **Synthetic Data Generation**
+The synthetic data generation pipeline provides a large and diverse set of sequence pairs:
+1. Programs (`sequence B`) generate experimental setups.
+2. Quantum states (`sequence A`) resulting from the setups.
+
+This asymmetric generation process allows training models on challenging mappings from quantum states to Python programs.
+
+---
+
 ## Repository Structure
 
 ### **Data Directories**
 
 #### **`data_main`** (main task)
 Contains scripts and resources for generating and managing synthetic data for experimental setups:
-- `generate_data.py`: The second step in the data generation pipeline.
 - `generate_topologies.py`: The first step in the data generation pipeline.
+- `generate_data.py`: The second step in the data generation pipeline.
 - `graphdata.py`: Library for computing quantum states from graph-based representations.
 - `reorganizedata.py`: Utility for restructuring data files into the required format.
 - `shuffledata.py`: Script for randomizing the order of data entries.
@@ -51,29 +85,17 @@ Synthetic data generation for quantum circuits:
 
 ---
 
-## Features
-
-### **Meta-Design of Quantum Experiments**
-This repository focuses on using transformer models for meta-design, enabling the generation of scalable solutions to classes of problems. For example:
-- Generate Python programs for designing experimental setups for quantum states like GHZ and W-states.
-- Extrapolate solutions to larger system sizes using patterns captured during training.
-
-### **Synthetic Data Generation**
-The synthetic data generation pipeline provides a large and diverse set of sequence pairs:
-1. Programs (`sequence B`) generate experimental setups.
-2. Quantum states (`sequence A`) resulting from the setups.
-
-This asymmetric generation process allows training models on challenging mappings from quantum states to Python programs.
-
----
-
 ## Reproducibility / Data
 
 Below are instructions on how to reproduce our work based on the code provided here. We are in the process of uploading data and model checkpoint files to [Zenodo](https://zenodo.org/records/14899993) for additional reproducibility. While these files will provide convenient access to pre-generated data and trained models, all necessary scripts and configurations are already included in this repository to allow complete reproduction of the data and models.
 
 ---
 
-## Installation
+## System Requirements & Installation
+
+### Software
+
+The time to install all requirements should be less than five minutes.
 
 1. Clone the repository:
    ```bash
@@ -81,17 +103,28 @@ Below are instructions on how to reproduce our work based on the code provided h
    cd metadesign
    ```
 
-2. Install pytheus, a library necessary for simulating the quantum optics experiments relevant to our work:
-   ```bash
-   pip install pytheusQ
-   ```
+2. Install the packages specified by ```requirements.txt```
+    ```bash
+    pip install -r requirements.txt
+    ```
 
 ---
 
+### Hardware
+* For data generation multiple processes running in parallel on CPUs were used. 
+* For training we used data parallelism on four A100-40GB GPUs, but single GPUs can be also used if gradient accumulation is used to achieve the desired batch size.
+* For sampling we used single consumer grade GPUs. CPUs will be slower, but the models are small enough to sample with reasonable speed
+
+---
 ## Demo
 
 ### **Training**
-Run the training script with the desired configuration:
+
+#### Data
+The data should be generated through the data generation pipeline described below. A subset of the data can be downloaded from [Zenodo](https://zenodo.org/records/14899993). The files should be stored in ```data_main``` and ```data_circuits``` respectively. The h5 files should comply with ```traindata_prefix``` (files should be named ```{traindata_prefix}_{i}``` where ```i``` is an index starting at zero) and ```split_train``` (total number of files the data is split into) given by the respective config files (from ```ckpt_main``` and ```ckpt_circuit```).
+
+#### Run training
+Run the training script with the desired configuration. 
 ```bash
 python train.py --config ckpt_circuit/config.py
 ```
@@ -199,23 +232,6 @@ state generated for N = 3
 state generated for N = 4
 (+1/√2)|XXXXX>+(+1/√2)|YYYYY>
 ```
-
----
-
-## Methodology
-
-This repository employs a transformer-based sequence-to-sequence model trained on synthetic datasets of quantum states and Python programs. The transformer captures patterns in the data to generate interpretable solutions that generalize across problem domains. Synthetic data generation is achieved by simulating quantum optics experiments using the `pytheusQ` library for the main task or simulating quantum circuits using the `qiskit` library. Sampling uses probabilistic techniques to generate multiple candidate solutions, which are then evaluated for fidelity to the target quantum states.
-
----
-
-## Results and Insights
-
-This project demonstrates the ability of transformer models to:
-1. Generate human-readable Python code that generalizes across problem domains.
-2. Rediscover known meta-solutions (e.g., GHZ state setups).
-3. Discover new meta-solutions for previously unsolved classes of quantum experiments, such as spin-½ states in photonic systems.
-
-The interpretability of the generated solutions provides human-readable insights into the underlying patterns, enabling scientists to extend these solutions to larger, more complex systems.
 
 ---
 
@@ -434,20 +450,6 @@ loop:
 
 ---
 
-## System Requirements & Installation
-
-### Software
-We provide system requirements for sampling the model in ```requirements.txt```
-
-The time to install all requirements should be less than five minutes.
-
-### Hardware
-* For data generation multiple processes running in parallel on CPUs were used. 
-* For training we used data parallelism on four A100-40GB GPUs, but single GPUs can be also used if gradient accumulation is used to achieve the desired batch size
-* For sampling we used single consumer grade GPUs. CPUs will be slower, but the models are small enough to sample with reasonable speed
-
----
-
 ## Citation
 
 If you use this repository in your work, please cite:
@@ -465,4 +467,5 @@ If you use this repository in your work, please cite:
 * zenodo: https://doi.org/10.5281/zenodo.14899993
 * arxiv: https://doi.org/10.48550/arXiv.2406.02470
 
-
+## Acknowledgements
+* the structure of the code for the model and training is for the most part a modified version of nanoGPT https://github.com/karpathy/nanoGPT (our model is encoder-decoder instead of decoder-only)
