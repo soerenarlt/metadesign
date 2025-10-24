@@ -1,7 +1,7 @@
 import numpy as np
 import itertools
 # from html_plot import plot_graph
-from fancy_classes import Graph
+from pytheus.fancy_classes import Graph
 from valpos_res import val_verts_0, val_verts_1
 
 import os
@@ -99,26 +99,30 @@ if __name__ == '__main__':
     print(f"Local Task ID: {local_id}")
     SLURMID = str(32*int(node_id) + int(local_id))
 
+    save_dir = 'topologies'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
     configA = {
-        'data_path' : 'topologies/LONG_DEG2',
+        'filename' : 'LONG_DEG2',
         'line_num_bounds_0' : [4, 12],
         'line_num_bounds_1' : [2, 12],
         'MIN_DEGREE' : 2
     }
     configB = {
-        'data_path' : 'topologies/SHORT_DEG2',
+        'filename' : 'SHORT_DEG2',
         'line_num_bounds_0' : [4, 8],
         'line_num_bounds_1' : [2, 6],
         'MIN_DEGREE' : 2
     }
     configC = {
-        'data_path' : 'topologies/LONG_DEG1',
+        'filename' : 'LONG_DEG1',
         'line_num_bounds_0' : [4, 12],
         'line_num_bounds_1' : [2, 12],
         'MIN_DEGREE' : 1
     }
     configD = {
-        'data_path' : 'topologies/SHORT_DEG1',
+        'filename' : 'SHORT_DEG1',
         'line_num_bounds_0' : [4, 8],
         'line_num_bounds_1' : [2, 6],
         'MIN_DEGREE' : 1
@@ -131,9 +135,7 @@ if __name__ == '__main__':
         'D' : configD
     }
 
-    globals().update(configs[args.config])
-
-    
+    config = configs[args.config]
 
     failed_at_loop = 0
     failed_at_degree = 0
@@ -150,8 +152,8 @@ if __name__ == '__main__':
                 # print(f'failed_at_loop: {failed_at_loop}')
                 # print(f'failed_at_degree: {failed_at_degree}')
                 # print(f'failed_at_pms: {failed_at_pms}')
-            num_lines_0 = np.random.randint(*(line_num_bounds_0))
-            num_lines_1 = np.random.randint(*(line_num_bounds_1))
+            num_lines_0 = np.random.randint(*(config['line_num_bounds_0']))
+            num_lines_1 = np.random.randint(*(config['line_num_bounds_1']))
 
             #shape (num_lines_0, 2)
             layer_0 = np.random.randint(len(val_verts_0), size=(num_lines_0, 2))
@@ -179,7 +181,7 @@ if __name__ == '__main__':
                     valid = False
                     failed_at_loop += 1
                     break
-                if not check_degree_and_vertcount(gg,vertex_count, min_degree=MIN_DEGREE):
+                if not check_degree_and_vertcount(gg,vertex_count, min_degree=config['MIN_DEGREE']):
                     valid = False
                     failed_at_degree += 1
                     break
@@ -190,11 +192,11 @@ if __name__ == '__main__':
                 valid = True
         print('CODE FOUND')
         #save layer_0, layer_1 to file
-        with open(f'{data_path}.txt', 'a') as f:
+        with open(os.path.join(save_dir, f'topology_{config['filename']}.txt'), 'a') as f:
             layer_0 = [list(edge) for edge in layer_0]
             layer_1 = [list(edge) for edge in layer_1]
             f.write(f'{layer_0}|{layer_1}\n')
 
-print(f'time taken: {time.time()-tt} seconds')
+    print(f'time taken: {time.time()-tt} seconds')
 
 
