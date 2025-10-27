@@ -134,6 +134,12 @@ def main() -> None:
     parser.add_argument("--task_id", type=int, default=0, help="Task index for distributed runs.")
     parser.add_argument("--config", type=str, default="A", choices=list("ABCD"), help="Which config to use.")
     parser.add_argument(
+        "--num_tops",
+        type=int,
+        default=1,
+        help="Number of topologies to generate in this run (default: 1).",
+    )
+    parser.add_argument(
         "--verbose-invalid",
         action="store_true",
         help="If set, print reasons when a candidate graph is rejected.",
@@ -151,6 +157,7 @@ def main() -> None:
     print(f"[init] Local Task ID: {local_id}")
     print(f"[init] Computing config {args.config}")
     print(f"[hint] To change config, use --config with A, B, C, or D")
+    print(f"[init] Generating {args.num_tops} topologies")
     SLURMID = str(32 * int(node_id) + int(local_id))
 
     save_dir = "topologies"
@@ -191,7 +198,8 @@ def main() -> None:
 
     tt = time.time()
 
-    for _ in range(1):
+    NUM_TOPS = args.num_tops
+    for _ in range(NUM_TOPS):
         valid = False
         num_tries = 0
 
