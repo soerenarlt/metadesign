@@ -192,7 +192,7 @@ if __name__ == '__main__':
                 valid = True
         print('CODE FOUND')
         #save layer_0, layer_1 to file
-        with open(os.path.join(save_dir, f'topology_{config['filename']}.txt'), 'a') as f:
+        with open(os.path.join(save_dir, f"{config['filename']}.txt"), 'a') as f:
             layer_0 = [list(edge) for edge in layer_0]
             layer_1 = [list(edge) for edge in layer_1]
             f.write(f'{layer_0}|{layer_1}\n')
