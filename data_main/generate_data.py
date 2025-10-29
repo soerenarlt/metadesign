@@ -20,6 +20,7 @@ from typing import Dict, Iterable, List, Sequence, Tuple
 
 import h5py
 import numpy as np
+import math
 
 from pytheus.fancy_classes import Graph
 from generate_topologies import generate_graph
@@ -95,6 +96,51 @@ def build_state_string(state) -> str:
     return "".join(s)
 
 
+def normalize_state_segment(seg: str) -> str:
+    """
+    Canonicalize one N-segment of a state string by:
+      - parsing terms like "+2[axby...]" into (weight, ket)
+      - dividing all weights by their gcd (absolute)
+      - sorting terms lexicographically by ket string
+      - re-emitting with explicit '+' for positive weights
+
+    This mirrors the cleanup performed in reorganizedata.py but happens pre-tokenization.
+    If the segment cannot be parsed safely, the original segment is returned unchanged.
+    """
+    if not seg:
+        return seg
+    try:
+        raw_terms = [t for t in seg.split(']') if t]
+        terms: List[Tuple[int, str]] = []
+        for t in raw_terms:
+            if '[' not in t:
+                # unexpected layout
+                return seg
+            weight_str, ket_inner = t.split('[', 1)
+            w = int(weight_str)  # handles leading '+' or '-' as well
+            ket = '[' + ket_inner + ']'
+            terms.append((w, ket))
+        if not terms:
+            return seg
+        # gcd of absolute weights
+        g = abs(terms[0][0])
+        for w, _ in terms[1:]:
+            g = math.gcd(g, abs(w))
+        g = g or 1
+        # divide and sort by ket
+        normed = [ (w // g, k) for (w, k) in terms ]
+        normed.sort(key=lambda x: x[1])
+        # recompose
+        out = []
+        for w, k in normed:
+            sign = '+' if w > 0 else ''  # zero shouldn't occur as we never emit zero-weight terms
+            out.append(f"{sign}{w}{k}")
+        return "".join(out)
+    except Exception:
+        # On any parsing issue, fall back to original
+        return seg
+
+
 def tokenize_string(input_str: str, token_dict: Dict[str, int]) -> np.ndarray:
     """
     Greedy tokenization by prefix matching. Adds <SOS> at start and <EOS> at end.
@@ -123,6 +169,32 @@ def detokenize_indices(indices: Iterable[int], token_dict: Dict[str, int]) -> st
     """
     reverse = {v: k for k, v in token_dict.items()}
     return "".join(reverse.get(ix, "") for ix in indices if ix != token_dict["<PAD>"])
+
+
+def get_worker_info(args) -> Tuple[int, int]:
+    """Determine (worker_id, num_workers) from CLI and common schedulers.
+    Priority:
+      1) Explicit --worker-id/--num-workers
+      2) SLURM array (SLURM_ARRAY_TASK_ID/SLURM_ARRAY_TASK_COUNT)
+      3) SLURM MPI (SLURM_PROCID/SLURM_NTASKS)
+      4) Fallback to single worker (0,1)
+    """
+    if args.worker_id is not None:
+        return int(args.worker_id), int(args.num_workers or 1)
+
+    env = os.environ
+    # SLURM array jobs
+    if "SLURM_ARRAY_TASK_ID" in env:
+        wid = int(env.get("SLURM_ARRAY_TASK_ID", 0))
+        n = int(env.get("SLURM_ARRAY_TASK_COUNT", 1))
+        return wid, max(n, 1)
+    # SLURM MPI
+    if "SLURM_PROCID" in env:
+        wid = int(env.get("SLURM_PROCID", 0))
+        n = int(env.get("SLURM_NTASKS", 1))
+        return wid, max(n, 1)
+    # Local fallback
+    return 0, 1
 
 
 def build_graph_and_state(
@@ -199,91 +271,28 @@ def append_batch_to_h5(
 # Main
 # =========================
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--task_id", type=int, default=0, help="Task index for distributed runs.")
-    parser.add_argument(
-        "--verbose-invalid",
-        action="store_true",
-        help="If set, print reasons when a candidate graph/state is rejected.",
-    )
-    parser.add_argument(
-        "--num-samples",
-        type=int,
-        default=DEFAULT_NUM_SAMPLES,
-        help=f"Total samples to produce (default: {DEFAULT_NUM_SAMPLES}).",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=DEFAULT_BATCH_SIZE,
-        help=f"Samples per HDF5 write (default: {DEFAULT_BATCH_SIZE}).",
-    )
-    parser.add_argument(
-        "--max-toks",
-        type=int,
-        default=DEFAULT_MAX_TOKS,
-        help=f"Maximum token sequence length (default: {DEFAULT_MAX_TOKS}).",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Random seed for reproducibility (default: None).",
-    )
-    args = parser.parse_args()
-
-    node_id = args.task_id
-    local_id = os.environ.get("SLURM_LOCALID", 0)
-    print(f"[init] Local Task ID: {local_id}")
-    SLURMID = str(32 * int(node_id) + int(local_id))
-
-    # Seed control
-    if args.seed is not None:
-        np.random.seed(args.seed)
-        print(f"[init] numpy RNG seeded with {args.seed}")
-
-    # tokens
-    token_dict = json.load(open("tok.json"))
-
-    def build_config_dict(ind: int):
-        possible_values = {
-            "CODELEN": ["SHORT", "LONG"],
-            "DEGREE": ["DEG1", "DEG2"],
-            "DIMENSION": ["2D", "3D"],
-            "EDGEWEIGHT": ["WEIGHTED", "UNWEIGHTED"],
-            "MAX_KETS": ["8-16-32", "6-6-6"],
-        }
-        all_combinations = list(itertools.product(*possible_values.values()))
-        print(f"[config] number of combinations: {len(all_combinations)}")
-        print(f"[config] chosen index: {ind} of {len(all_combinations)} (applied modulo if needed)")
-        combination = all_combinations[ind % len(all_combinations)]
-        cfg = {key: combination[i] for i, key in enumerate(possible_values.keys())}
-        return cfg, len(all_combinations)
-
-    config_dict, num_combinations = build_config_dict(int(SLURMID))
-    FILE_IND = int(SLURMID) // num_combinations
-    globals().update(config_dict)
+def generate_for_config(config_dict: Dict[str, str], token_dict: Dict[str, int], num_samples_target: int, batch_size: int, max_toks: int, verbose_invalid: bool, run_id: str) -> None:
+    """
+    Generate samples for a single configuration and write to a unique part file.
+    """
+    # IO setup for this config
+    DIR_NAME = "data"
+    TOP_FILENAME = f"topologies/{config_dict['CODELEN']}_{config_dict['DEGREE']}.txt"
+    OUT_DIR = f"{DIR_NAME}/{'_'.join(str(v) for v in config_dict.values())}"
+    if not os.path.exists(OUT_DIR):
+        os.makedirs(OUT_DIR, exist_ok=True)
+    FILE_NAME = f"{OUT_DIR}/{run_id}.h5"
+    LOG_FILE_PATH = f"{OUT_DIR}/{run_id}.txt"
 
     topology_dict = {("LONG", "DEG2"): 0, ("SHORT", "DEG2"): 1, ("LONG", "DEG1"): 2, ("SHORT", "DEG1"): 3}
-    topology_letter = topology_dict[(CODELEN, DEGREE)]
+    topology_letter = topology_dict[(config_dict["CODELEN"], config_dict["DEGREE"])]
     MAX_KETS_tuple = tuple(int(v) for v in config_dict["MAX_KETS"].split("-"))
-
-    # IO setup
-    DIR_NAME = "data"
-    TOP_FILENAME = f"topologies/{CODELEN}_{DEGREE}.txt"
-    OUT_DIR = f"{DIR_NAME}/{'_'.join(str(v) for v in config_dict.values())}"
-    if FILE_IND == 0 and not os.path.exists(OUT_DIR):
-        os.makedirs(OUT_DIR)
-    FILE_NAME = f"{OUT_DIR}/{FILE_IND}.h5"
-    LOG_FILE_PATH = f"{OUT_DIR}/{FILE_IND}.txt"
 
     print("[init] configuration:", config_dict)
     print(f"[init] topology file: {TOP_FILENAME}")
     print(f"[init] output H5:      {FILE_NAME}")
     print(f"[init] log file:       {LOG_FILE_PATH}")
-    print(f"[init] samples target: {args.num_samples}, batch size: {args.batch_size}, max toks: {args.max_toks}")
-    print(f"[hint] config is chosen by SLURMID mod {num_combinations} combinations.")
+    print(f"[init] samples target: {num_samples_target}, batch size: {batch_size}, max toks: {max_toks}")
 
     # Store run metadata in the H5 file attributes
     with h5py.File(FILE_NAME, "a") as f:
@@ -302,12 +311,12 @@ def main() -> None:
     t0 = time.time()
 
     print("[run] starting main loop…")
-    while valid_codes < args.num_samples:
-        with open(TOP_FILENAME, "r") as fh:
-            data = fh.read()
+    with open(TOP_FILENAME, "r") as fh:
+        topo_data = fh.read()
 
-        for line_ind, line in enumerate(data.split("\n")):
-            if valid_codes >= args.num_samples:
+    while valid_codes < num_samples_target:
+        for line_ind, line in enumerate(topo_data.split("\n")):
+            if valid_codes >= num_samples_target:
                 break
             if line == "":
                 continue
@@ -346,7 +355,7 @@ def main() -> None:
                             layer_0, layer_1, N, layer_0_extra, layer_1_extra
                         )
                     except Exception as e:
-                        if args.verbose_invalid:
+                        if verbose_invalid:
                             print(f"[validate] N={N} invalid graph/state (reason: {e})")
                         valid = False
                         break
@@ -376,7 +385,7 @@ def main() -> None:
                                 layer_0, layer_1, N, layer_0_extra, layer_1_extra
                             )
                         except Exception as e:
-                            if args.verbose_invalid:
+                            if verbose_invalid:
                                 print(f"[build] N={N} failed (reason: {e})")
                             valid = False
                             break
@@ -390,7 +399,10 @@ def main() -> None:
                         degrees = np.sort(degrees)
                         degrees_list[N, : (4 + 2 * N)] = degrees
 
-                        state_str_parts.append(build_state_string(state))
+                        # Build state string and normalize per segment (GCD reduction + sorted kets)
+                        seg = build_state_string(state)
+                        seg = normalize_state_segment(seg)
+                        state_str_parts.append(seg)
 
                     if not valid:
                         continue
@@ -430,13 +442,13 @@ def main() -> None:
                     if valid_codes % 200 == 0:
                         elapsed = time.time() - t0
                         rate_kph = (valid_codes / (elapsed / 3600)) / 1000 if elapsed > 0 else 0.0
-                        print(f"[progress] {valid_codes}/{args.num_samples} samples | "
+                        print(f"[progress] {valid_codes}/{num_samples_target} samples | "
                               f"{elapsed:.1f}s elapsed | {rate_kph:.2f}k samples/hr")
 
                     break  # break REPS loop after a valid sample
 
             # Batch flush
-            if len(data_buffer) >= args.batch_size:
+            if len(data_buffer) >= batch_size:
                 elapsed = time.time() - t0
                 unique_topologies = len(set(used_topologies))
                 with open(LOG_FILE_PATH, "a") as logf:
@@ -445,16 +457,144 @@ def main() -> None:
                         f"{(valid_codes/(elapsed/3600))/1000:.2f}k samples/hr, "
                         f"{unique_topologies} unique topologies\n"
                     )
-                append_batch_to_h5(FILE_NAME, data_buffer, max_toks=args.max_toks)
+                append_batch_to_h5(FILE_NAME, data_buffer, max_toks=max_toks)
                 print(f"[h5] wrote batch of {len(data_buffer)} (total {valid_codes})")
                 data_buffer = []
 
     # Final flush if needed
     if data_buffer:
-        append_batch_to_h5(FILE_NAME, data_buffer, max_toks=args.max_toks)
+        append_batch_to_h5(FILE_NAME, data_buffer, max_toks=max_toks)
         print(f"[h5] wrote final batch of {len(data_buffer)}")
 
     print("[done] generation complete.")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--task_id", type=int, default=0, help="Deprecated; prefer --worker-id.")
+    parser.add_argument(
+        "--verbose-invalid",
+        action="store_true",
+        help="If set, print reasons when a candidate graph/state is rejected.",
+    )
+    parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=DEFAULT_NUM_SAMPLES,
+        help=f"Total samples to produce (default: {DEFAULT_NUM_SAMPLES}).",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help=f"Samples per HDF5 write (default: {DEFAULT_BATCH_SIZE}).",
+    )
+    parser.add_argument(
+        "--max-toks",
+        type=int,
+        default=DEFAULT_MAX_TOKS,
+        help=f"Maximum token sequence length (default: {DEFAULT_MAX_TOKS}).",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed for reproducibility (default: None).",
+    )
+    parser.add_argument("--worker-id", type=int, default=None, help="Worker index [0..num_workers-1].")
+    parser.add_argument("--num-workers", type=int, default=None, help="Total workers participating.")
+    parser.add_argument("--config-index", type=int, default=None, help="Override config combination index.")
+    parser.add_argument("--cycle-all", action="store_true", help="Cycle through all combinations.")
+    parser.add_argument("--cycles", type=int, default=1, help="Number of cycles when --cycle-all is set (0=infinite).")
+    parser.add_argument("--run-id", type=str, default=None, help="Optional unique run id for output filenames.")
+    args = parser.parse_args()
+
+    # Back-compat: if task_id passed without worker-id, use it
+    if args.worker_id is None and args.task_id is not None:
+        try:
+            args.worker_id = int(args.task_id)
+        except Exception:
+            pass
+
+    worker_id, num_workers = get_worker_info(args)
+    print(f"[init] worker: {worker_id}, total number of workers: {num_workers}")
+
+    # Seed control
+    if args.seed is not None:
+        np.random.seed(args.seed)
+        print(f"[init] numpy RNG seeded with {args.seed}")
+
+    # tokens
+    token_dict = json.load(open("tok.json"))
+
+    def build_config_dict(ind: int):
+        possible_values = {
+            "CODELEN": ["SHORT", "LONG"],
+            "DEGREE": ["DEG1", "DEG2"],
+            "DIMENSION": ["2D", "3D"],
+            "EDGEWEIGHT": ["WEIGHTED", "UNWEIGHTED"],
+            "MAX_KETS": ["8-16-32", "6-6-6"],
+        }
+        all_combinations = list(itertools.product(*possible_values.values()))
+        combination = all_combinations[ind % len(all_combinations)]
+        cfg = {key: combination[i] for i, key in enumerate(possible_values.keys())}
+    # Build all combinations once
+    possible_values = {
+        "CODELEN": ["SHORT", "LONG"],
+        "DEGREE": ["DEG1", "DEG2"],
+        "DIMENSION": ["2D", "3D"],
+        "EDGEWEIGHT": ["WEIGHTED", "UNWEIGHTED"],
+        "MAX_KETS": ["8-16-32", "6-6-6"],
+    }
+    combos = list(itertools.product(*possible_values.values()))
+    num_combos = len(combos)
+    print(f"[config] number of combinations: {num_combos}")
+
+    def cfg_from_index(ind: int) -> Dict[str, str]:
+        tup = combos[ind % num_combos]
+        return {key: tup[i] for i, key in enumerate(possible_values.keys())}
+
+    # derive run_id for file uniqueness
+    default_run_id = args.run_id or f"{int(time.time())}_{os.getpid()}_{worker_id}"
+
+    if args.cycle_all:
+        cycles = args.cycles
+        cycle_counter = 0
+        while True:
+            cycle_counter += 1
+            print(f"[cycle] Starting cycle {cycle_counter}")
+            for combo_index in range(num_combos):
+                cfg = cfg_from_index(combo_index)
+                run_id = f"{default_run_id}_c{cycle_counter}_i{combo_index}"
+                print(f"[cycle] combo index: {combo_index}")
+                # one batch per combo per cycle
+                generate_for_config(
+                    cfg,
+                    token_dict,
+                    num_samples_target=args.batch_size,
+                    batch_size=args.batch_size,
+                    max_toks=args.max_toks,
+                    verbose_invalid=args.verbose_invalid,
+                    run_id=run_id,
+                )
+            if cycles > 0 and cycle_counter >= cycles:
+                break
+    else:
+        # choose config index
+        if args.config_index is not None:
+            chosen_index = int(args.config_index)
+        else:
+            chosen_index = worker_id
+        cfg = cfg_from_index(chosen_index)
+        generate_for_config(
+            cfg,
+            token_dict,
+            num_samples_target=args.num_samples,
+            batch_size=args.batch_size,
+            max_toks=args.max_toks,
+            verbose_invalid=args.verbose_invalid,
+            run_id=default_run_id,
+        )
 
 
 if __name__ == "__main__":
