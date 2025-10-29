@@ -271,7 +271,16 @@ def append_batch_to_h5(
 # Main
 # =========================
 
-def generate_for_config(config_dict: Dict[str, str], token_dict: Dict[str, int], num_samples_target: int, batch_size: int, max_toks: int, verbose_invalid: bool, run_id: str) -> None:
+def generate_for_config(
+    config_dict: Dict[str, str],
+    token_dict: Dict[str, int],
+    num_samples_target: int,
+    batch_size: int,
+    max_toks: int,
+    verbose_invalid: bool,
+    run_id: str,
+    max_time: int | None = None,
+) -> None:
     """
     Generate samples for a single configuration and write to a unique part file.
     """
@@ -311,11 +320,21 @@ def generate_for_config(config_dict: Dict[str, str], token_dict: Dict[str, int],
     t0 = time.time()
 
     print("[run] starting main loop…")
+    start_time = time.time()
+    def time_exceeded() -> bool:
+        return (max_time is not None) and ((time.time() - start_time) >= max_time)
     with open(TOP_FILENAME, "r") as fh:
         topo_data = fh.read()
 
+    timed_out = False
     while valid_codes < num_samples_target:
+        if time_exceeded():
+            timed_out = True
+            break
         for line_ind, line in enumerate(topo_data.split("\n")):
+            if time_exceeded():
+                timed_out = True
+                break
             if valid_codes >= num_samples_target:
                 break
             if line == "":
@@ -329,6 +348,9 @@ def generate_for_config(config_dict: Dict[str, str], token_dict: Dict[str, int],
 
             valid = False
             for _ in range(REPS):
+                if time_exceeded():
+                    timed_out = True
+                    break
                 # Parse and shuffle layers
                 parts = line.split("|")
                 layer_0 = eval(parts[0])
@@ -460,12 +482,17 @@ def generate_for_config(config_dict: Dict[str, str], token_dict: Dict[str, int],
                 append_batch_to_h5(FILE_NAME, data_buffer, max_toks=max_toks)
                 print(f"[h5] wrote batch of {len(data_buffer)} (total {valid_codes})")
                 data_buffer = []
+            if timed_out:
+                break
 
     # Final flush if needed
     if data_buffer:
         append_batch_to_h5(FILE_NAME, data_buffer, max_toks=max_toks)
         print(f"[h5] wrote final batch of {len(data_buffer)}")
 
+    if timed_out:
+        elapsed_all = time.time() - start_time
+        print(f"[timeout] Max time reached after {elapsed_all:.1f}s; samples generated: {valid_codes}")
     print("[done] generation complete.")
 
 
@@ -506,6 +533,7 @@ def main() -> None:
     parser.add_argument("--config-index", type=int, default=None, help="Override config combination index.")
     parser.add_argument("--cycle-all", action="store_true", help="Cycle through all combinations.")
     parser.add_argument("--cycles", type=int, default=1, help="Number of cycles when --cycle-all is set (0=infinite).")
+    parser.add_argument("--max-time", type=int, default=None, help="Max seconds per config run in cycle-all mode.")
     parser.add_argument("--run-id", type=str, default=None, help="Optional unique run id for output filenames.")
     args = parser.parse_args()
 
@@ -566,6 +594,7 @@ def main() -> None:
             for combo_index in range(num_combos):
                 cfg = cfg_from_index(combo_index)
                 run_id = f"{default_run_id}_c{cycle_counter}_i{combo_index}"
+                print("-"*40)
                 print(f"[cycle] combo index: {combo_index}")
                 # one batch per combo per cycle
                 generate_for_config(
@@ -576,6 +605,7 @@ def main() -> None:
                     max_toks=args.max_toks,
                     verbose_invalid=args.verbose_invalid,
                     run_id=run_id,
+                    max_time=args.max_time,
                 )
             if cycles > 0 and cycle_counter >= cycles:
                 break

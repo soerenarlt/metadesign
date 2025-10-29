@@ -48,8 +48,16 @@ def dataset_names_and_shapes(sample_file: str) -> Tuple[List[str], Dict[str, Tup
 def total_len_for_dir(outdir: str, key: str = "code") -> int:
     total = 0
     for fp in list_part_files(outdir):
-        with h5py.File(fp, "r") as f:
-            total += f[key].shape[0]
+        try:
+            with h5py.File(fp, "r") as f:
+                if key in f:
+                    total += f[key].shape[0]
+                else:
+                    # skip incomplete files that have no required datasets
+                    continue
+        except (OSError, KeyError):
+            # unreadable or malformed file; skip
+            continue
     return total
 
 
@@ -64,8 +72,22 @@ def read_slice_from_dir(outdir: str, start: int, end: int) -> Dict[str, np.ndarr
     if not parts:
         return {}
 
-    # identify dataset names and shapes from the first file
-    ds_names, _ = dataset_names_and_shapes(parts[0])
+    # pick the first valid file that has the required datasets (at least 'code')
+    valid_sample_file = None
+    for p in parts:
+        try:
+            with h5py.File(p, "r") as f:
+                if "code" in f and f["code"].shape[0] > 0:
+                    valid_sample_file = p
+                    break
+        except OSError:
+            continue
+    if valid_sample_file is None:
+        return {}
+
+    ds_names, _ = dataset_names_and_shapes(valid_sample_file)
+    if not ds_names:
+        return {}
 
     # We'll collect in lists then concat
     buckets: Dict[str, List[np.ndarray]] = {name: [] for name in ds_names}
@@ -73,19 +95,28 @@ def read_slice_from_dir(outdir: str, start: int, end: int) -> Dict[str, np.ndarr
     # Traverse files and slice
     offset = 0
     for fp in parts:
-        with h5py.File(fp, "r") as f:
-            n = f[ds_names[0]].shape[0]
-            file_start = max(0, start - offset)
-            file_end = min(n, start - offset + remaining)
-            if file_start < file_end:
-                sl = slice(file_start, file_end)
-                for name in ds_names:
-                    buckets[name].append(np.array(f[name][sl]))
-                remaining -= (file_end - file_start)
-                start += (file_end - file_start)
-            offset += n
-            if remaining == 0:
-                break
+        try:
+            with h5py.File(fp, "r") as f:
+                # skip files missing required datasets
+                if any(name not in f for name in ds_names) or ("code" not in f):
+                    continue
+                n = f["code"].shape[0]
+                if n == 0:
+                    continue
+                file_start = max(0, start - offset)
+                file_end = min(n, start - offset + remaining)
+                if file_start < file_end:
+                    sl = slice(file_start, file_end)
+                    for name in ds_names:
+                        buckets[name].append(np.array(f[name][sl]))
+                    remaining -= (file_end - file_start)
+                    start += (file_end - file_start)
+                offset += n
+                if remaining == 0:
+                    break
+        except (OSError, KeyError):
+            # unreadable or malformed file; skip
+            continue
 
     # Concat per dataset
     out: Dict[str, np.ndarray] = {}
@@ -112,9 +143,12 @@ def build_split(split_index: int, data_split: int, outdirs: List[str], tmp_split
     Returns total rows written for the split.
     """
     total_written = 0
+    # Only create the file if we actually have data to write, to avoid empty shells
     with h5py.File(tmp_split_path, "w") as out_h5:
         for outdir in outdirs:
             total_len = total_len_for_dir(outdir)
+            if split_index == 0:
+                print(f"[split] OUT_DIR: {outdir},\t total samples: {total_len}")
             start = int(total_len * split_index / data_split)
             end = int(total_len * (split_index + 1) / data_split)
             if end <= start:
@@ -123,9 +157,14 @@ def build_split(split_index: int, data_split: int, outdirs: List[str], tmp_split
             if not data:
                 continue
             create_or_resize_datasets(out_h5, data)
-            # update total
             any_key = next(iter(data.keys()))
             total_written += data[any_key].shape[0]
+    # If nothing was written, delete the empty split file to keep downstream simple
+    if total_written == 0:
+        try:
+            os.remove(tmp_split_path)
+        except OSError:
+            pass
     return total_written
 
 
@@ -163,8 +202,6 @@ def main():
         print("[split] No OUT_DIRs found under", args.data_dir)
         return
     print(f"[split] Found {len(outdirs)} OUT_DIRs:")
-    for d in outdirs:
-        print("  -", d)
 
     for i in range(args.data_split):
         tmp_split = os.path.join(args.data_dir, f"split_data_{i}.h5")
@@ -172,6 +209,9 @@ def main():
         print(f"[split] Building split {i+1}/{args.data_split} -> {tmp_split}")
         total = build_split(i, args.data_split, outdirs, tmp_split)
         print(f"[split]   rows written: {total}")
+        if total == 0:
+            print("[split]   no rows for this shard; skipping shuffle and removing temp file if present")
+            continue
         print(f"[shuffle] Shuffling -> {shuffled}")
         shuffle_split(tmp_split, shuffled, seed=args.seed)
         if not args.keep_intermediate:
