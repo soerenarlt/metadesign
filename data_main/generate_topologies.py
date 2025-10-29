@@ -131,7 +131,6 @@ def check_pms(graph: Sequence[Sequence[int]]) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--task_id", type=int, default=0, help="Task index for distributed runs.")
     parser.add_argument("--config", type=str, default="A", choices=list("ABCD"), help="Which config to use.")
     parser.add_argument(
         "--num_tops",
@@ -152,13 +151,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    node_id = args.task_id
-    local_id = os.environ.get("SLURM_LOCALID", 0)
-    print(f"[init] Local Task ID: {local_id}")
     print(f"[init] Computing config {args.config}")
     print(f"[hint] To change config, use --config with A, B, C, or D")
     print(f"[init] Generating {args.num_tops} topologies")
-    SLURMID = str(32 * int(node_id) + int(local_id))
 
     save_dir = "topologies"
     if not os.path.exists(save_dir):
