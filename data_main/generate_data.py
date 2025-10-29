@@ -554,18 +554,6 @@ def main() -> None:
 
     # tokens
     token_dict = json.load(open("tok.json"))
-
-    def build_config_dict(ind: int):
-        possible_values = {
-            "CODELEN": ["SHORT", "LONG"],
-            "DEGREE": ["DEG1", "DEG2"],
-            "DIMENSION": ["2D", "3D"],
-            "EDGEWEIGHT": ["WEIGHTED", "UNWEIGHTED"],
-            "MAX_KETS": ["8-16-32", "6-6-6"],
-        }
-        all_combinations = list(itertools.product(*possible_values.values()))
-        combination = all_combinations[ind % len(all_combinations)]
-        cfg = {key: combination[i] for i, key in enumerate(possible_values.keys())}
     # Build all combinations once
     possible_values = {
         "CODELEN": ["SHORT", "LONG"],
