@@ -45,7 +45,9 @@ Run these from the `data_main/` folder. This is a minimal demo to prove the pipe
   This uses *cycle‑all* mode to iterate all 32 configs once and writes a small part file per config. The 30s limit skips  is just for demonstration and is not typically used in production.
 
   ```bash
-  python generate_data.py --cycle-all --cycles 1 --batch-size 10 --max-time 30
+  # add --plaintext to also write a single demo JSONL file per run
+  # (one object per line: {"source": <state_str>, "target": <code_str>}; handy for inspection, optional)
+  python generate_data.py --cycle-all --cycles 1 --batch-size 10 --max-time 30 --plaintext
   ```
 
   You'll find the h5 files in subdirectories of `data/`. The folder names correspond to the ID of the 32 possible data-gen configs.
