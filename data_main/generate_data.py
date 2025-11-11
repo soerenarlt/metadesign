@@ -280,6 +280,7 @@ def generate_for_config(
     verbose_invalid: bool,
     run_id: str,
     max_time: int | None = None,
+    plaintext: bool = False,
 ) -> None:
     """
     Generate samples for a single configuration and write to a unique part file.
@@ -317,6 +318,8 @@ def generate_for_config(
     used_topologies: List[int] = []
     valid_codes = 0
     data_buffer: List[Dict[str, np.ndarray]] = []
+    json_buffer: List[Dict[str, str]] = []
+    jsonl_path = f"{OUT_DIR}/{run_id}.jsonl" if plaintext else None
     t0 = time.time()
 
     print("[run] starting main loop…")
@@ -460,6 +463,10 @@ def generate_for_config(
                     }
                     data_buffer.append(sample)
 
+                    # Optional JSON output for demonstration: one object per sample
+                    if plaintext:
+                        json_buffer.append({"source": state_str, "target": code_str})
+
                     # user-friendly progress echo
                     if valid_codes % 200 == 0:
                         elapsed = time.time() - t0
@@ -481,6 +488,14 @@ def generate_for_config(
                     )
                 append_batch_to_h5(FILE_NAME, data_buffer, max_toks=max_toks)
                 print(f"[h5] wrote batch of {len(data_buffer)} (total {valid_codes})")
+                # Append JSONL entries for this batch if requested (one object per line in a single run file)
+                if plaintext and json_buffer and jsonl_path is not None:
+                    with open(jsonl_path, "a") as tf:
+                        for obj in json_buffer:
+                            json.dump(obj, tf, ensure_ascii=False)
+                            tf.write("\n")
+                    print(f"[jsonl] appended {len(json_buffer)} samples to {jsonl_path}")
+                    json_buffer = []
                 data_buffer = []
             if timed_out:
                 break
@@ -489,6 +504,12 @@ def generate_for_config(
     if data_buffer:
         append_batch_to_h5(FILE_NAME, data_buffer, max_toks=max_toks)
         print(f"[h5] wrote final batch of {len(data_buffer)}")
+        if plaintext and json_buffer and jsonl_path is not None:
+            with open(jsonl_path, "a") as tf:
+                for obj in json_buffer:
+                    json.dump(obj, tf, ensure_ascii=False)
+                    tf.write("\n")
+            print(f"[jsonl] appended {len(json_buffer)} samples to {jsonl_path}")
 
     if timed_out:
         elapsed_all = time.time() - start_time
@@ -535,6 +556,7 @@ def main() -> None:
     parser.add_argument("--cycles", type=int, default=1, help="Number of cycles when --cycle-all is set (0=infinite).")
     parser.add_argument("--max-time", type=int, default=None, help="Max seconds per config run in cycle-all mode.")
     parser.add_argument("--run-id", type=str, default=None, help="Optional unique run id for output filenames.")
+    parser.add_argument("--plaintext", action="store_true", help="Also write a demo JSONL file per run (one object per line: {'source': state_str, 'target': code_str}).")
     args = parser.parse_args()
 
     # Back-compat: if task_id passed without worker-id, use it
@@ -554,18 +576,6 @@ def main() -> None:
 
     # tokens
     token_dict = json.load(open("tok.json"))
-
-    def build_config_dict(ind: int):
-        possible_values = {
-            "CODELEN": ["SHORT", "LONG"],
-            "DEGREE": ["DEG1", "DEG2"],
-            "DIMENSION": ["2D", "3D"],
-            "EDGEWEIGHT": ["WEIGHTED", "UNWEIGHTED"],
-            "MAX_KETS": ["8-16-32", "6-6-6"],
-        }
-        all_combinations = list(itertools.product(*possible_values.values()))
-        combination = all_combinations[ind % len(all_combinations)]
-        cfg = {key: combination[i] for i, key in enumerate(possible_values.keys())}
     # Build all combinations once
     possible_values = {
         "CODELEN": ["SHORT", "LONG"],
@@ -606,6 +616,7 @@ def main() -> None:
                     verbose_invalid=args.verbose_invalid,
                     run_id=run_id,
                     max_time=args.max_time,
+                    plaintext=args.plaintext,
                 )
             if cycles > 0 and cycle_counter >= cycles:
                 break
@@ -624,6 +635,7 @@ def main() -> None:
             max_toks=args.max_toks,
             verbose_invalid=args.verbose_invalid,
             run_id=default_run_id,
+            plaintext=args.plaintext,
         )
 
 
