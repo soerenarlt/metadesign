@@ -29,7 +29,7 @@ Run these from the `data_main/` folder. This is a minimal demo to prove the pipe
 
 1) **Create one topology for each topology config**
 
-  Usually you generate thousands (it’s slow). Here we create just one for the four possible topology config settings:
+  Usually you generate thousands (it’s slow). Here we create just one topology for each of the four possible topology config settings:
 
   ```bash
   python generate_topologies.py --config A --num_tops 1
@@ -42,13 +42,15 @@ Run these from the `data_main/` folder. This is a minimal demo to prove the pipe
 
 2) **Try to create 10 samples for each of the 32 data‑gen configs, with a 30s time limit per config**
 
-  This uses *cycle‑all* mode to iterate all 32 configs once and writes a small part file per config. The 30s limit skips  is just for demonstration and is not typically used in production.
+  The command below iterates over all 32 configs once (`--cycle-all --cycles 1`) and writes a small (`--batch-size 10` samples) file per config. The 30s limit skip is just to speed up the demonstration (by skipping slower configs) and is not typically used in production.
 
   ```bash
-  # add --plaintext to also write a single demo JSONL file per run
-  # (one object per line: {"source": <state_str>, "target": <code_str>}; handy for inspection, optional)
   python generate_data.py --cycle-all --cycles 1 --batch-size 10 --max-time 30 --plaintext
   ```
+
+  We add the optional flag `--plaintext` to also write a single JSONL file per run in the same output directory.
+  This file contains one JSON object per line with the fields `{"source": <state_str>, "target": <code_str>}` for each generated sample.
+  It’s useful for quick inspection or prototyping outside the HDF5 format, but it’s not required for the pipeline.
 
   You'll find the h5 files in subdirectories of `data/`. The folder names correspond to the ID of the 32 possible data-gen configs.
 
