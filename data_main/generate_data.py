@@ -23,8 +23,28 @@ import numpy as np
 import math
 
 from pytheus.fancy_classes import Graph
-from generate_topologies import generate_graph
-from valpos_res import val_verts_0, val_verts_1
+
+# Support both package and script execution
+try:
+    from .generate_topologies import generate_graph  # type: ignore
+    from .valpos_res import val_verts_0, val_verts_1  # type: ignore
+    from .shared_api import (  # type: ignore
+        tokenize_string,
+        detokenize_indices,
+        build_state_string,
+        normalize_state_segment,
+        _coalesce_edges_and_reject_zeros,
+    )
+except Exception:  # fallback when running as a script from data_main/
+    from generate_topologies import generate_graph
+    from valpos_res import val_verts_0, val_verts_1
+    from shared_api import (
+        tokenize_string,
+        detokenize_indices,
+        build_state_string,
+        normalize_state_segment,
+        _coalesce_edges_and_reject_zeros,
+    )
 
 
 # =========================
@@ -36,15 +56,6 @@ DEFAULT_NUM_SAMPLES: int = 50_000
 DEFAULT_BATCH_SIZE: int = 1_000
 
 
-# =========================
-# Pretty maps for state strings
-# =========================
-
-_POSITIONS = "abcdefgh"
-_MODES = "xyz"
-position_dict: Dict[int, str] = {i: _POSITIONS[i] for i in range(8)}
-mode_dict: Dict[int, str] = {i: _MODES[i] for i in range(3)}
-
 # vertex counts for N in {0, 1, 2}
 VERTEX_NUMS = [4, 6, 8]
 
@@ -52,123 +63,6 @@ VERTEX_NUMS = [4, 6, 8]
 # =========================
 # Helpers
 # =========================
-
-def _coalesce_edges_and_reject_zeros(
-    edges5: Iterable[Sequence[int]],
-    strict_zero: bool = True,
-) -> List[Tuple[int, int, int, int, int]]:
-    """
-    Deterministic semantics for duplicate edges:
-      - Sum weights for duplicate (u, v, cu, cv).
-      - If strict_zero is True, raise if any aggregated weight becomes 0.
-      - Otherwise, drop zero-weight edges.
-
-    Input:
-        edges5: iterable of 5-tuples (u, v, cu, cv, w)
-
-    Returns:
-        List of 5-tuples (u, v, cu, cv, w) with aggregated, non-zero weights.
-    """
-    acc: Dict[Tuple[int, int, int, int], int] = {}
-    for e in edges5:
-        key = tuple(e[:4])  # type: ignore[index]
-        w = int(e[4])       # type: ignore[index]
-        acc[key] = acc.get(key, 0) + w
-
-    zeros = [k for k, w in acc.items() if w == 0]
-    if zeros and strict_zero:
-        # Caller can catch and mark the candidate invalid.
-        raise ValueError("Zero-weight edge after aggregation.")
-
-    return [(*k, w) for k, w in acc.items() if w != 0]
-
-
-def build_state_string(state) -> str:
-    """
-    Build a compact, human-readable state string like: '+2[axbycxdy]+1[aybxcxdy]'
-    """
-    s = []
-    for ket in state.kets:
-        weight = state[ket]
-        if weight != 0:
-            pretty = "".join(position_dict[i] + mode_dict[j] for (i, j) in ket)
-            s.append(("+" if weight > 0 else "") + f"{weight}[{pretty}]")
-    return "".join(s)
-
-
-def normalize_state_segment(seg: str) -> str:
-    """
-    Canonicalize one N-segment of a state string by:
-      - parsing terms like "+2[axby...]" into (weight, ket)
-      - dividing all weights by their gcd (absolute)
-      - sorting terms lexicographically by ket string
-      - re-emitting with explicit '+' for positive weights
-
-    This mirrors the cleanup performed in reorganizedata.py but happens pre-tokenization.
-    If the segment cannot be parsed safely, the original segment is returned unchanged.
-    """
-    if not seg:
-        return seg
-    try:
-        raw_terms = [t for t in seg.split(']') if t]
-        terms: List[Tuple[int, str]] = []
-        for t in raw_terms:
-            if '[' not in t:
-                # unexpected layout
-                return seg
-            weight_str, ket_inner = t.split('[', 1)
-            w = int(weight_str)  # handles leading '+' or '-' as well
-            ket = '[' + ket_inner + ']'
-            terms.append((w, ket))
-        if not terms:
-            return seg
-        # gcd of absolute weights
-        g = abs(terms[0][0])
-        for w, _ in terms[1:]:
-            g = math.gcd(g, abs(w))
-        g = g or 1
-        # divide and sort by ket
-        normed = [ (w // g, k) for (w, k) in terms ]
-        normed.sort(key=lambda x: x[1])
-        # recompose
-        out = []
-        for w, k in normed:
-            sign = '+' if w > 0 else ''  # zero shouldn't occur as we never emit zero-weight terms
-            out.append(f"{sign}{w}{k}")
-        return "".join(out)
-    except Exception:
-        # On any parsing issue, fall back to original
-        return seg
-
-
-def tokenize_string(input_str: str, token_dict: Dict[str, int]) -> np.ndarray:
-    """
-    Greedy tokenization by prefix matching. Adds <SOS> at start and <EOS> at end.
-    """
-    indices: List[int] = [token_dict["<SOS>"]]
-    i = 0
-    while i < len(input_str):
-        found = False
-        for token, index in token_dict.items():
-            if input_str.startswith(token, i):
-                indices.append(index)
-                i += len(token)
-                found = True
-                break
-        if not found:
-            print("[tokenize] Unknown token at position", i)
-            print(input_str[i - 1 : i + 3])
-            raise Exception("unknown token found")
-    indices.append(token_dict["<EOS>"])
-    return np.array(indices, dtype="int8")
-
-
-def detokenize_indices(indices: Iterable[int], token_dict: Dict[str, int]) -> str:
-    """
-    Reverse of tokenize_string(), ignoring <PAD>.
-    """
-    reverse = {v: k for k, v in token_dict.items()}
-    return "".join(reverse.get(ix, "") for ix in indices if ix != token_dict["<PAD>"])
 
 
 def get_worker_info(args) -> Tuple[int, int]:
@@ -575,7 +469,9 @@ def main() -> None:
         print(f"[init] numpy RNG seeded with {args.seed}")
 
     # tokens
-    token_dict = json.load(open("tok.json"))
+    # token dict path robust to cwd
+    tok_path = os.path.join(os.path.dirname(__file__), "tok.json")
+    token_dict = json.load(open(tok_path))
     # Build all combinations once
     possible_values = {
         "CODELEN": ["SHORT", "LONG"],
